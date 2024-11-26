@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+"""
+Author : Matt Brown 
+Source : https://github.com/nmatt0/firmwaretools/blob/master/parse-uboot-dump.py
+"""
 import re
 import sys
 
