@@ -1,0 +1,16 @@
+POST /Home.htm HTTP/1.1
+Host: 192.168.1.3
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 116
+Origin: http://192.168.1.3
+Connection: keep-alive
+Referer: http://192.168.1.3/
+Cookie: LoginName=YWRtaW4%3D; LoginPWD=NXVw
+Upgrade-Insecure-Requests: 1
+Priority: u=0, i
+
+login_name=&login_pwd=&lang=en&time=443208963&un=YWRtaW4%3D&pw=NXVw&h_lang=en&this_file=login.htm&next_file=Home.htm

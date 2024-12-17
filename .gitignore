@@ -1,5 +1,7 @@
 # Firmware
-dump/firmware.bin
+dump/*.bin
+dump/squashfs-root
+venv
 ## Core latex/pdflatex auxiliary files:
 *.aux
 *.lof
