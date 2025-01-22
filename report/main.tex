@@ -29,11 +29,11 @@
 \maketitle	
 \tableofcontents
 \newpage
+\section{Abstract}
+Closed source firmware cannot be trusted. Therefore, we will show how to hack an access point and search for exploitable vulnerabilities from the hardware to the software. Doing, so we will take a look at how U-boot and BusyBox shells can be used and leveraged to our advantage. Afterwards, we will showcase a level 10\footnote{\url{https://nvd.nist.gov/vuln/detail/CVE-2014-0659}} known vulnerability (which is in fact a backdoor placed by the constructor) that allows remote code execution and how it was found. 
 \section{Introduction}
-Nowadays most IOT devices contain some flavor of a vulnerability, backdoor or critical bug. However, those problems in some cases are never fixed as IoT devices are dependent on their vendors for firmware update due their code being proprietary (in most cases). Furthermore, some users might forget (or not know) that their device's software is not updated and by extension, vulnerable. The goal of this project is to show how easy or un-easy it is to dump, find and exploit an access point.
-\subsection{Context}
-In this section we will explain what the target is and what are the settings and boundaries of the analysis.
-\subsection{Device}
+Nowadays most IOT devices contain some flavor of a vulnerability, backdoor or critical bug. However, those problems in some cases are never fixed as IoT devices are dependent on their vendors for firmware update due their code being proprietary (in most cases). Furthermore, some users might forget (or not know) that their device's software is not updated and by extension, vulnerable. This paper takes the approach of a guide on how to perform basic hardware hacking on everyday embedded devices. What should be taken away from this work is the process which aims to be as generic as possible and not the results as the chosen target is now discontinued and irrelevant. Therefore, we will start by setting the scope of our analysis then, do reconnaissance under those constraints followed by the exploitation of our findings.
+\section{Scope}
 The device is an access point from Cisco released in October 2008, aimed at small businesses. This products has been discontinued in 2019 and its sales ended back in 2014.
 \begin{figure}[!h]
 	\centering
@@ -56,16 +56,15 @@ The device is an access point from Cisco released in October 2008, aimed at smal
 	\label{wap4410n}
 \end{figure}
 
-The device can be powered up using a barrel adapter or through PoE which hints at its purpose being ease of batch deployment. On the network side, it support 802.11n, 802.11g and 802.11b. With the time period in mind, and, for 802.11b and g, the only supported encryption protocol was WEP (64/128 bits in this case). Also, firmware updates were handled through the web portal (as there is no I/O) sadly, they are down. On figure \ref{inside}, we can see a cable going outside of the device, this is the UART access which was enabled by default. Most of the remaining ICs are irrelevant/too old to be told apart because of wear of the imprint and/or arcane references.
+The device can be powered up using a barrel adapter or through PoE which hints at its purpose being ease of batch deployment. On the network side, it support 802.11n, 802.11g and 802.11b. With the time period in mind, for 802.11b and g, the only supported encryption protocol was WEP (64/128 bits in this case). Also, firmware updates were handled through the web porta : there is no I/O on the device. On figure \ref{inside}, we can see a cable going outside of the device, this is the UART access which was enabled by default.
 \subsection{Lab setup}
-The testing setup is made of the WAP4410N, a router and my computer : for simplicity sake, the router is out of scope from this analysis and all its security features are disabled. The computer has a  wireless connection to the AP.
+The testing setup is made of the WAP4410N, a router and a computer : for simplicity sake, the router is out of scope from this analysis and all its security features are disabled. The computer has a wireless connection to the AP.
 \begin{figure}[!ht]
 	\includesvg[width=\textwidth]{images/lab.svg}	
 	\caption{Lab setup}
 \end{figure}
-
-\noindent The equipment that I used was very minimal,
-
+\subsubsection{Equipment}
+The following table contains all the software and hardware required for basic hardware hacking. The only barriers of entry are the TTL and multimeter (for safety) which can both be obtained for cheap or borrowed.
 \begin{figure}[!ht]
 \begin{tabular}{|c|c|}
 	\hline
@@ -81,7 +80,7 @@ The testing setup is made of the WAP4410N, a router and my computer : for simpli
 \end{figure}
 
 
-At first, I intended to use a SPI programmer (CH341a) to dump the firmware more easily using \href{https://github.com/flashrom/flashrom}{flashrom}. However, as we will see in later section it was not feasible in this context without specialized hardware toosl. On the software side, there are no real limitations as most of the state of the art tools are free and open source (with the exception of IDA).
+At first, we intended to use a SPI programmer (CH341a) to dump the firmware more easily using \href{https://github.com/flashrom/flashrom}{flashrom}. However, as we will see in a later section, it was not feasible in this context without specialized hardware tools. On the software side, there are no real limitations as most of the state of the art tools are free and open source (with the exception of IDA).
 \section{Reconnaissance}
 In this section, we will discuss the reconnaissance of our device. This part was inspired by the first step in the cyber kill chain (which will be vaguely followed throughout the following sections). We will proceed in a bottom up approach in regards to the level of abstraction : from hardware to software
 \subsection{Physical}
@@ -265,4 +264,26 @@ This \href{https://nvd.nist.gov/vuln/detail/CVE-2014-0659}{CVE} is a backdoor pl
 	\caption{Capture of the exploit traffic}
 \end{figure}
 when analyzing the traffic we can notice the data that we sent and as the answer we get, 53 63 4d 4d ff ff ff ff 00 00 00 00 which translates to ScMM. Based on the work of \href{https://github.com/elvanderb/TCP-32764}{Eloi Vanderbken} : you can use this exploit to get remote code execution on the device. Going into some reverse engineering of the vulnerable binary.
+\subsection{Reverse Engineering}
+The vulnerability is located int he \textbf{scfgmgr} file : we know this because it mas mentioned by the discoverer of the vulnerability. However, to find it naturally, one can look at the process list and analyze all the programs that sound like they don't belong there. The backdoor opens a new child process for each new connection to its socket and starts an alarm of 10s during which you have to send the correct character sequence : 
+\begin{enumerate}
+	\item Checks if the response starts with the correct code \textit{(ScMM)} and is followed by and identifier ( we will call it \textbf{id} ) and optionally an argument
+	\item The program matches the \textbf{id} and, if it matches with a known \textbf{id} it performs the corresponding action \textit{eg. there is an id for restarting the device}
+	\item The child process terminates
+\end{enumerate}
+
+One of those \textit{id}, opens a pipe that calls for \textbf{popen} with the user input as argument and returns the output through the socket.
+\begin{figure}[!ht]
+	\begin{lstlisting}[language=c]
+	  read_ret = (char *)malloc(1);
+	  *read_ret = '\0';
+	  *output = read_ret;
+	  __stream = popen(command,"r");	
+	\end{lstlisting}
+	\caption{Snippet of vulnerable code}	
+\end{figure}
+In the snippet above, \textbf{command} is a user input and, the resulting stream from the \textbf{popen} command is read into the \textbf{read\_ret} which is pointed by \textbf{output} : a function argument. After, returning from the pipe, \textbf{output} is written to the socket.
+
+
 \end{document}
+
