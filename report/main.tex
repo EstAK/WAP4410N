@@ -56,7 +56,7 @@ The device is an access point from Cisco released in October 2008, aimed at smal
 	\label{wap4410n}
 \end{figure}
 
-The device can be powered up using a barrel adapter or through PoE which hints at its purpose being ease of batch deployment. On the network side, it support 802.11n, 802.11g and 802.11b. With the time period in mind, for 802.11b and g, the only supported encryption protocol was WEP (64/128 bits in this case). Also, firmware updates were handled through the web porta : there is no I/O on the device. On figure \ref{inside}, we can see a cable going outside of the device, this is the UART access which was enabled by default.
+\noindent The device can be powered up using a barrel adapter or through PoE which hints at its purpose being ease of batch deployment. On the network side, it support 802.11n, 802.11g and 802.11b. With the time period in mind, for 802.11b and g, the only supported encryption protocol was WEP (64/128 bits in this case). Also, firmware updates were handled through the web portal : there is no I/O on the device. On figure \ref{inside}, we can see a cable going outside of the device, this is the UART access which was enabled by default.
 \subsection{Lab setup}
 The testing setup is made of the WAP4410N, a router and a computer : for simplicity sake, the router is out of scope from this analysis and all its security features are disabled. The computer has a wireless connection to the AP.
 \begin{figure}[!ht]
@@ -82,9 +82,10 @@ The following table contains all the software and hardware required for basic ha
 
 At first, we intended to use a SPI programmer (CH341a) to dump the firmware more easily using \href{https://github.com/flashrom/flashrom}{flashrom}. However, as we will see in a later section, it was not feasible in this context without specialized hardware tools. On the software side, there are no real limitations as most of the state of the art tools are free and open source (with the exception of IDA).
 \section{Reconnaissance}
-This section was inspired by one of the steps cyber kill chain which will vaguely be followed throughout this paper. This is the most important part of any hardware hacking project : the more information about the target we have the easier finding vulnerabilities will become.
+This is the most important part of any hardware hacking project : the more information about the target we have the easier finding vulnerabilities will become. We can first start by searching on the internet if there are any information on our device : usually checking its \href{https://fcc.report/FCC-ID/Q87-WAP4410N}{fcc} id and the \href{https://nvd.nist.gov/products/cpe/search/results?namingFormat=2.3&orderBy=2.3&keyword=cpe%3A2.3%3Ao%3Acisco%3Awap4410n_firmware&status=FINAL}{nvd} is a good starting point.
+
 \subsection{Physical}
-\paragraph{Teardown} The device is held together by four 8-points screws under rubber feets which indicates that it wasn't meant to be opened (nor repaired \dots). Once inside, most of the device is empty and everything is available without further need to dismantle it. 
+\paragraph{Teardown} The device is held together by four 8-points screws under rubber feet which indicates that it wasn't meant to be opened (nor repaired \dots). Once inside, most of the device is empty and everything is available without further need to dismantle it. 
 
 \paragraph{IC reconnaissance} At this point we can start looking for interesting ICs like flash memory or processors :
 
@@ -119,7 +120,7 @@ This section was inspired by one of the steps cyber kill chain which will vaguel
 	\end{itemize}
 \end{minipage}
 \noindent The MIPS architecture is very common on embedded devices and very easy to reverse engineer its assembly. However, this makes it impossible for us to use frida as MIPS is only available in the pro version. Then, regarding the NAND flash, as hinted before, reading a 48 TSOP IC requires specialised and expensive hardware. Therefore, using an SPI programmer to dump it is out of the question.
-\paragraph{Finding the UART} This is the most important step of the physical reconnaissance : the UART allows us to communicate with the device from a computer. To find it, we have to usually look for 3 to 4 pins next to each other. 
+\paragraph{Finding the UART} This is the most important step of the physical reconnaissance : the UART allows us to communicate with the device from a computer. To find it, we have to usually look for 3 to 4 pins next to each other.
 
 \begin{figure}[!ht]
 	\includesvg[width=\textwidth]{images/uart.svg}
@@ -175,48 +176,50 @@ From the capture snippet above we see that the rootfs uses jffs2 however, this i
 \begin{lstlisting}
 Kernel command line: console=ttyS0,
 	115200 root=31:02 rootfstype=squashfs init=/sbin/init mtdparts=ar9100-nor0:256k(u-boot),
-	64k(u-boot-env),
-	6464k(rootfs),
-	1280k(uImage),
-	64k(nvram),
-	64k(calibration) 
-	mem=32M 	
 \end{lstlisting}
-This snippet comes after the previous ones and tells us that rootfs uses squashfs. This information can be confirmed later using the console and/or by analyzing the dumped firmware. Usually an embedded device has two file systems with overlayfs : the union of two filesystems where the lower is read only (squashfs) and the upper read write (jffs2) for persistency. However, the device only uses squashfs, the configuration files are saved on non volatile memory through a program found in $/usr/sbin/nvram$
+We can see that rootfs uses squasfs which is a read only filesystem as shown in the snippet above : this can be confirmed in the console later. But, how is the device configuration stored persistently ? Usually an embedded device has two filesystems in an overlayfs where the lower is read only and the upper read write (jffs2) for persistency.
+\begin{figure}[!ht]
+	\centering
+	\includesvg[width=.5\textwidth ]{images/overlay.svg}	
+	\caption{diagram of an overlayfs}
+\end{figure} 
+
+\noindent However, the access point uses non volatile memory to store persistent device configuration (there is a cli to interact with it \lstinline{/usr/sbin/nvram}). Therefore, all the configurations is handled outside of any filesystem in a key-value store in nvram.
 \subsubsection{U-boot}\label{ubootinfo}
 At some point we are prompted to interrupt the auto boot : by doing so, we get the U-boot console which allows us to get more information on the device,
 \begin{lstlisting}
 ar7100> bdinfo
-...
 flashstart  = 0xBF000000
 flashsize   = 0x00800000
 flashoffset = 0x0002F690
-...
-baudrate    = 115200 bps	
 \end{lstlisting}
-We now know the memory addresses of the start and of the flash storage : this will come handy during the firmware extraction in \ref{Dumpuboot}. There are other useful commands available to us such as tftpboot which allows us to boot over the network by serving an image on our computer. Assuming that the console is protected, this could allow us to get an unrestricted console by providing our own patched image (or using an open source one). Other than that, there are custom commands for testing purposes.
+We now know the memory address and size of the flash storage : this will come handy during the firmware extraction in \ref{Dumpuboot}. There are other useful commands available to us such as tftpboot but in this context, they are not useful.
 \subsection{Console}
-If we leave the autoboot alone, we get into a root Linux ash shell. There are device specific CLI commands and a reduced busybox. There is a fwversion command which tell us that the firmware version is 2.0.4.2. As we are already root, we can't really do any privilege escalation. Furthermore, as the device only has a squashfs3 file system we can't get any persistency.
-\subsection{Network}
+If we leave the autoboot alone, we get into a root Linux ash shell. There are device specific CLI commands and a reduced busybox. We can get the firmware version with the fwversion command : 2.0.4.2. As we are already root, we can't really do any privilege escalation.
+\subsection{Network}\label{netreco}
 We can run a port scan on the device using nmap, 
 
 \begin{lstlisting}
-Nmap scan report for wap86eb04 (192.168.1.3)  
-Host is up (0.012s latency).  
-Not shown: 65532 closed tcp ports (reset)  
 PORT      STATE SERVICE  
 80/tcp    open  http  
 443/tcp   open  https  
 32764/tcp open  unknown  
-MAC Address: CC:EF:48:86:EB:04 (Cisco Systems)
 \end{lstlisting}
 
-The http(s) ports are used for the web administrative portals : when using the http web portal the credential are sent through base64. However, this isn't really a problem as the http port will most likely be disabled by any competent IT staff in real use cases
+The http(s) ports are used for the web administrative portals : when using the http web portal the credential are sent through base64. This isn't really a problem as the http port will most likely be disabled by any competent IT staff in real use cases. However, the port 32764 being open for TCP is not normal and should be explored. To do so, we will try to connect to it using netcat : when sending a random input we get answered with ScMM and the connection closes (if left alone it closes by itself).
+\begin{figure}[!ht]
+	\centering
+	\includegraphics[width=\textwidth]{example.png}
+	\caption{Capture of the exploit traffic}
+\end{figure}
+
+\noindent We can analyze the communication in wireshark : the answer we get is 12 bytes long : 53 63 4d 4d ff ff ff ff 00 00 00 00 which translates to ScMM. After googling this string we get a matching \href{https://github.com/elvanderb/TCP-32764}{vulnerability}	
 \section{Exploitation}
-In this section we will see how to exploit the device
+
 \subsection{Dumping the firmware}
+In this section we will see how to exploit the device by retrieving its firmware. Then, we will showcase a vulnerability and explain it by reversing the related program from the dumped firmware.
 \subsubsection{Through the bootloader}\label{Dumpuboot}
-This is the most "classical" technique used to dump firmware because of its simplicity and lack of technical and material requirements. To perform it, we will leverage the memory display command using the addresse from \ref{ubootinfo} and capturing the output. The size is written in decimal and divided by 4 as it reads by blocks of dwords. When the read is done, the output has to be cleaned into a binary format (there is a script in the repo). However, this technique didn't work in our case. The reason, is unclear as the output is not entirely unreadable when using binwalk : some possible reasons might be,
+This is the "classical" technique used to dump firmware as its very simple (but slow). To perform it, we will use the addresses from \ref{ubootinfo} and capturing the output. The size is written in decimal and divided by 4 as it reads by blocks of dwords. The dump uses the xxd format and has to be cleaned. However, this technique didn't work in our case. The reason, is unclear as the output is not entirely unreadable when using binwalk : some possible reasons might be,
 \begin{itemize}
 	\item glitchy cable
 	\item this version of U-Boot has a problem with memory display
@@ -224,7 +227,7 @@ This is the most "classical" technique used to dump firmware because of its simp
 	\item endianness problem	
 \end{itemize}
 \subsubsection{Through the console}
-To do so, we have to update the version of busybox : we will download precompiled busybox binary and serve it to our device through an ftp server. We download it in the /tmp directory as it the only location in a read only filesystem where we can write a file. From there, we use netcat to upload the mtd partitions : concatenate the partitions together to make the whole firmware image :
+To do so, we have to update the version of busybox : we will download a precompiled busybox binary and serve it to our device through an ftp server. We download it in the /tmp directory as it the only location in a read only filesystem where we can write a file. From there, we use netcat to exfiltrate the mtd partitions to our computer then concatenate them together to make the whole firmware image :
 
 \begin{lstlisting}[
     basicstyle=\fontsize{5}{7}\selectfont\ttfamily
@@ -256,24 +259,17 @@ DECIMAL                            HEXADECIMAL                        DESCRIPTIO
 -----------------------------------------------------------------------------------------------------
 \end{lstlisting}
 
-with this we can do some reverse engineering however, as the rootfs uses squashfs3 we can't patch binaries on the fly : we need to upload the entire firmware therefore we didn't path any binary.
 \subsection{CVE-2014-0659}
-This \href{https://nvd.nist.gov/vuln/detail/CVE-2014-0659}{CVE} is a backdoor planted by SerComm. To try it, we ping the 32764 using netcat : this opens a prompt in which after entering some random data and press enter will answer with ScMM,
-\begin{figure}[!ht]
-	\centering
-	\includegraphics[width=\textwidth]{example.png}
-	\caption{Capture of the exploit traffic}
-\end{figure}
-when analyzing the traffic we can notice the data that we sent and as the answer we get, 53 63 4d 4d ff ff ff ff 00 00 00 00 which translates to ScMM. Based on the work of \href{https://github.com/elvanderb/TCP-32764}{Eloi Vanderbken} : you can use this exploit to get remote code execution on the device. Going into some reverse engineering of the vulnerable binary.
-\subsection{Reverse Engineering}
-The vulnerability is located int he \textbf{scfgmgr} file : we know this because it mas mentioned by the discoverer of the vulnerability. However, to find it naturally, one can look at the process list and analyze all the programs that sound like they don't belong there. The backdoor opens a new child process for each new connection to its socket and starts an alarm of 10s during which you have to send the correct character sequence : 
+This CVE corresponds to the "weird" open TCP port that we found in \ref{netreco}. We will explain its capabilities by using the script provided by the discoverer on his repo. After adapting it to our situation, we can use it to remotely dump the device configuration. However, the backdoor allows for remote code execution which means that the device is absolutely unsecure and should not be used under any circumstances.
+\subsubsection{Reverse Engineering}
+The vulnerability is located in the \textbf{usr/sbin/scfgmgr} program : we know this because it was mentioned by the discoverer of the vulnerability. However, to find it naturally, one can look at the process list and analyze all the programs that sound like they don't belong there. The backdoor opens a new child process for each new connection to its socket and starts an alarm of 10s during which you have to send the correct character sequence (this is why the netcat console closes by itself when left alone) then it : 
 \begin{enumerate}
 	\item Checks if the response starts with the correct code \textit{(ScMM)} and is followed by and identifier ( we will call it \textbf{id} ) and optionally an argument
-	\item The program matches the \textbf{id} and, if it matches with a known \textbf{id} it performs the corresponding action \textit{eg. there is an id for restarting the device}
+	\item The program matches the \textbf{id} and, if it matches with a known \textbf{id} it performs the corresponding action \textit{(eg. reboot the device, dump the firmware,\dots)}
 	\item The child process terminates
 \end{enumerate}
 
-One of those \textit{id}, opens a pipe that calls for \textbf{popen} with the user input as argument and returns the output through the socket.
+\noindent One of those \textit{id}, opens a pipe that calls for \textbf{popen} with the user input as argument and returns the output through the socket.
 \begin{figure}[!ht]
 	\begin{lstlisting}[language=c]
 	  read_ret = (char *)malloc(1);
@@ -283,8 +279,27 @@ One of those \textit{id}, opens a pipe that calls for \textbf{popen} with the us
 	\end{lstlisting}
 	\caption{Snippet of vulnerable code}	
 \end{figure}
-In the snippet above, \textbf{command} is a user input and, the resulting stream from the \textbf{popen} command is read into the \textbf{read\_ret} which is pointed by \textbf{output} : a function argument. After, returning from the pipe, \textbf{output} is written to the socket.
+In the snippet above, \textbf{command} is a user input and, the resulting stream from the \textbf{popen} command is read into the \textbf{read\_ret} which is pointed by \textbf{output} : a function argument. After, returning from the pipe, \textbf{output} is written to the socket\footnote{The ghidra project with comments is included in the project \href{https://github.com/EstAK/WAP4410N}{repo}}.
+\subsubsection{Patch}
+This backdoor was patched in a later version of the firmware however, according to the original discover it was only obfuscated\footnote{\url{https://www.synacktiv.com/ressources/TCP32764_backdoor_again.pdf}}. We cannot verify this as the specific firmware version is not downloadable anymore.
 
+\section{Conclusion}
+Through the exploitation of the WAP4410N access point, we identified multiple attack vectors and outlined a simple approach to basic hardware hacking. This process involved, gathering information about the device, gaining access and leveraging the gathered information to exploit it. We highlighted how a device that is meant for usage in a small business (potentially handling critical information) was poorly secured. Issues such as the headers for the UART being soldered, unprotected console access and a backdoor in the firmware underscores the severe risk to the network of utilizing this device. The field of embedded devices is riddled with unsecure firmware which would go unnoticed without security researchers. However, there are too many such devices therefore, there is a need for a push towards transparency and free software such as \href{https://openwrt.org/}{openwrt}. Furthermore, because of the quantity of internet connected device, most of them are not certified and should be strongly considered before connecting them to the internet.
+\begin{thebibliography}
 
+	\bibitem{defcon32} 
+	Andrew Bellini,
+	Anyone can hack IoT- Beginner’s Guide to Hacking Your First IoT Device,
+	\url{https://www.youtube.com/watch?v=YPcOwKtRuDQ&t=3s}
+
+	\bibitem{bluhat23} 
+	Sick codes, 
+	Advanced Hardware Hacking with Sick Codes,
+	\url{https://www.youtube.com/watch?v=v8Wxojm6UAw}
+
+	\bibitem{metasploitscmm}
+	Eloi Vanderbeken,Matt "hostess" Andreko,
+	SerComm Device - Remote Code Execution (Metasploit),
+	\url{https://www.exploit-db.com/exploits/30915}
+\end{thebibliography}
 \end{document}
-
