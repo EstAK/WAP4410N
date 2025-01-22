@@ -64,7 +64,7 @@ The testing setup is made of the WAP4410N, a router and a computer : for simplic
 	\caption{Lab setup}
 \end{figure}
 \subsubsection{Equipment}
-The following table contains all the software and hardware required for basic hardware hacking. The only barriers of entry are the TTL and multimeter (for safety) which can both be obtained for cheap or borrowed.
+The following table contains all the software and hardware required for basic hardware hacking. 
 \begin{figure}[!ht]
 \begin{tabular}{|c|c|}
 	\hline
@@ -82,7 +82,7 @@ The following table contains all the software and hardware required for basic ha
 
 At first, we intended to use a SPI programmer (CH341a) to dump the firmware more easily using \href{https://github.com/flashrom/flashrom}{flashrom}. However, as we will see in a later section, it was not feasible in this context without specialized hardware tools. On the software side, there are no real limitations as most of the state of the art tools are free and open source (with the exception of IDA).
 \section{Reconnaissance}
-In this section, we will discuss the reconnaissance of our device. This part was inspired by the first step in the cyber kill chain (which will be vaguely followed throughout the following sections). We will proceed in a bottom up approach in regards to the level of abstraction : from hardware to software
+This section was inspired by one of the steps cyber kill chain which will vaguely be followed throughout this paper. This is the most important part of any hardware hacking project : the more information about the target we have the easier finding vulnerabilities will become.
 \subsection{Physical}
 \paragraph{Teardown} The device is held together by four 8-points screws under rubber feets which indicates that it wasn't meant to be opened (nor repaired \dots). Once inside, most of the device is empty and everything is available without further need to dismantle it. 
 
@@ -118,15 +118,16 @@ In this section, we will discuss the reconnaissance of our device. This part was
 		\item bogomips : 265.21
 	\end{itemize}
 \end{minipage}
-\noindent The MIPS architecture is very common on embedded devices and very easy to reverse engineer its assembly. Regarding the NAND flash, it would as hinted before, it would require to de-solder the IC using a special SPI programmer (or an adapter for the ch341a).
-\paragraph{Finding the UART} There are 4 header pin on the board, we will try them using a multimeter : the UART has a very specific behavior.
+\noindent The MIPS architecture is very common on embedded devices and very easy to reverse engineer its assembly. However, this makes it impossible for us to use frida as MIPS is only available in the pro version. Then, regarding the NAND flash, as hinted before, reading a 48 TSOP IC requires specialised and expensive hardware. Therefore, using an SPI programmer to dump it is out of the question.
+\paragraph{Finding the UART} This is the most important step of the physical reconnaissance : the UART allows us to communicate with the device from a computer. To find it, we have to usually look for 3 to 4 pins next to each other. 
 
 \begin{figure}[!ht]
 	\includesvg[width=\textwidth]{images/uart.svg}
 	\caption{UART connected through Dupont cables with labeled ports}
 \end{figure}
+\newpage
 
-\noindent Before taking measures, we must find the ground, to do so, can check continuity between a metal part (which should be grounded) and the ground pin from a known IC (in this case the flash). After making sure that a metal part is grounded we can start taking measurements,
+\noindent On the device, there are 4 male header pins that might be the UART. We can check using a multimeter. First, we must find the ground, to do so, we can look at any IC datasheet and find a ground pin then, we can try to find a grounded metal to connect to it instead of a pin by checking for continuity. After having found a ground connection we can start taking measurements of our candidate,
 \begin{figure}[!ht]
 	\centering
 	\begin{tabular}{|c|c|c|c|}
@@ -142,21 +143,21 @@ In this section, we will discuss the reconnaissance of our device. This part was
 	\caption{Multimeter measurements}
 \end{figure}
 
-\noindent The voltage goes from 0V to the VCC, at startup because of the boot log outputs a lot of data. The Rx has a voltage of 0 as its used to receive data and doesn't send any. The next step is to try connecting the UART to the computer using a FT232, 
+\noindent The voltage goes from 0V to VCC, at startup because of the boot log outputs a lot of data. The RX has a voltage of 0 as its used to receive data and doesn't send any. The next step is to try connecting the UART to the computer using our TTL, 
 \begin{figure}[!ht]
 	\centering
 	\includesvg[width=\textwidth]{images/ft232.svg}
 	\caption{UART to USB-A }
 \end{figure}
 
-\noident Regarding the baudrate, we can try 115200 as its the most common,
+\noident Regarding the baudrate, we can try 115200 as its the most common value,
 \begin{lstlisting}
 	screen /dev/ttyUSB0 115200
 \end{lstlisting} 
 This is indeed the correct baudrate however, if that wasn't the case we would have had to find it by trial and error or by using a logic analyzer.
 \subsection{Bootloader}
 \subsubsection{Boot log}
-First, we will take a look at the boot log that is displayed before getting access to any console as analyzing it provides a lot of information about the hardware, software, ... One such information is the bootloader : U-Boot 1.1.4 which is a very commnon and open source bootloader. We can even tell that the bootloader was compiled the 19 of August 2009 at 14:53:37 which makes it very old
+First, we will take a look at the boot log that is displayed before getting access to any console as analyzing it provides a lot of information about the hardware, software, ... One such information is the bootloader : U-Boot 1.1.4 which is a very common and open source bootloader. 
 \begin{lstlisting}
 arg 1: console=ttyS0,115200
 arg 2: root=31:02
@@ -170,7 +171,7 @@ arg 5: mtdparts=ar9100-nor0:256k(u-boot),
 	64k(calibration)
 arg 6: mem=32M
 \end{lstlisting}
- From the capture snippet above we see that the rootfs uses jffs2 however, this is not the case.
+From the capture snippet above we see that the rootfs uses jffs2 however, this is not the case.
 \begin{lstlisting}
 Kernel command line: console=ttyS0,
 	115200 root=31:02 rootfstype=squashfs init=/sbin/init mtdparts=ar9100-nor0:256k(u-boot),
@@ -181,7 +182,7 @@ Kernel command line: console=ttyS0,
 	64k(calibration) 
 	mem=32M 	
 \end{lstlisting}
-This snippet comes after the previous ones and tells us that rootfs uses squashfs. This information can be confirmed later using the console and/or by analyzing the dumped firmware. There is no further information on the use of jffs2 on the device : in normal use cases, a device would have two filesystems one for persitency of configuration (read write) and the other containing the software (read only). How the device handles persistency remains a mistery in our case.
+This snippet comes after the previous ones and tells us that rootfs uses squashfs. This information can be confirmed later using the console and/or by analyzing the dumped firmware. Usually an embedded device has two file systems with overlayfs : the union of two filesystems where the lower is read only (squashfs) and the upper read write (jffs2) for persistency. However, the device only uses squashfs, the configuration files are saved on non volatile memory through a program found in $/usr/sbin/nvram$
 \subsubsection{U-boot}\label{ubootinfo}
 At some point we are prompted to interrupt the auto boot : by doing so, we get the U-boot console which allows us to get more information on the device,
 \begin{lstlisting}
